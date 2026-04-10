@@ -71,6 +71,15 @@ async function waitForStylesAndFonts(page, timeoutMs = 10000) {
   }, timeoutMs);
 }
 
+function hasExternalStyleOrFontRefs(html) {
+  // Avoid extra browser-side waits for pure inline HTML/CSS content.
+  return (
+    /<link[^>]+rel=["']?stylesheet/i.test(html)
+    || /@font-face/i.test(html)
+    || /fonts\.(googleapis|gstatic)\.com/i.test(html)
+  );
+}
+
 async function render(_opts = {}) {
   const opts = _.merge(
     {
@@ -88,7 +97,7 @@ async function render(_opts = {}) {
         timeout: 60000,
       },
       setContent: {
-        waitUntil: 'networkidle2',
+        waitUntil: 'domcontentloaded',
         timeout: 60000,
       },
       output: 'pdf',
@@ -163,28 +172,11 @@ async function render(_opts = {}) {
 
     if (_.isString(opts.html)) {
       logger.info('Set HTML ..');
-      try {
-        await page.setContent(opts.html, opts.setContent);
-      } catch (err) {
-        if (
-          err.name === 'TimeoutError'
-          && opts.setContent
-          && opts.setContent.waitUntil !== 'domcontentloaded'
-        ) {
-          logger.warn('setContent timed out. Retrying with domcontentloaded.');
-          const fallbackSetContentOpts = _.merge({}, opts.setContent, {
-            waitUntil: 'domcontentloaded',
-          });
-          await page.setContent(opts.html, fallbackSetContentOpts);
-        } else {
-          throw err;
-        }
-      }
+      await page.setContent(opts.html, opts.setContent);
 
-      await waitForStylesAndFonts(
-        page,
-        Math.min(_.get(opts, 'setContent.timeout', 10000), 15000),
-      );
+      if (hasExternalStyleOrFontRefs(opts.html)) {
+        await waitForStylesAndFonts(page, 3000);
+      }
     } else {
       logger.info(`Goto url ${opts.url} ..`);
       await page.goto(opts.url, opts.goto);

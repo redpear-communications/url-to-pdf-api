@@ -5,7 +5,7 @@ const logger = require('../util/logger')(__filename);
 
 async function createBrowser(opts) {
   const browserOpts = {
-    ignoreHTTPSErrors: opts.ignoreHttpsErrors,
+    acceptInsecureCerts: opts.ignoreHttpsErrors,
     slowMo: config.DEBUG_MODE ? 250 : undefined,
   };
   if (config.BROWSER_WS_ENDPOINT) {
@@ -51,6 +51,11 @@ async function render(_opts = {}) {
       },
       goto: {
         waitUntil: 'networkidle0',
+        timeout: 60000,
+      },
+      setContent: {
+        waitUntil: 'domcontentloaded',
+        timeout: 60000,
       },
       output: 'pdf',
       pdf: {
@@ -119,12 +124,12 @@ async function render(_opts = {}) {
 
     if (opts.cookies && opts.cookies.length > 0) {
       logger.info('Setting cookies..');
-      await page.setCookie(...opts.cookies);
+      await browser.setCookie(...opts.cookies);
     }
 
     if (_.isString(opts.html)) {
       logger.info('Set HTML ..');
-      await page.setContent(opts.html, opts.goto);
+      await page.setContent(opts.html, opts.setContent);
     } else {
       logger.info(`Goto url ${opts.url} ..`);
       await page.goto(opts.url, opts.goto);
@@ -186,7 +191,7 @@ async function render(_opts = {}) {
         const height = await getFullPageHeight(page);
         opts.pdf.height = height;
       }
-      data = await page.pdf(opts.pdf);
+      data = Buffer.from(await page.pdf(opts.pdf));
     } else if (opts.output === 'html') {
       data = await page.evaluate(() => document.documentElement.innerHTML);
     } else {
@@ -201,14 +206,14 @@ async function render(_opts = {}) {
         screenshotOpts.clip = opts.screenshot.clip;
       }
       if (_.isNil(opts.screenshot.selector)) {
-        data = await page.screenshot(screenshotOpts);
+        data = Buffer.from(await page.screenshot(screenshotOpts));
       } else {
         const selElement = await page.$(opts.screenshot.selector);
         const selectorScreenOpts = _.cloneDeep(
           _.omit(screenshotOpts, ['selector', 'fullPage']),
         );
         if (!_.isNull(selElement)) {
-          data = await selElement.screenshot(selectorScreenOpts);
+          data = Buffer.from(await selElement.screenshot(selectorScreenOpts));
         }
       }
     }

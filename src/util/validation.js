@@ -13,7 +13,7 @@ const cookieSchema = Joi.object({
   expires: Joi.number().min(1),
   httpOnly: Joi.boolean(),
   secure: Joi.boolean(),
-  sameSite: Joi.string().regex(/^(Strict|Lax)$/),
+  sameSite: Joi.string().regex(/^(Strict|Lax|None)$/),
 });
 
 const sharedQuerySchema = Joi.object({
@@ -36,7 +36,9 @@ const sharedQuerySchema = Joi.object({
   'viewport.isLandscape': Joi.boolean(),
   'goto.timeout': Joi.number().min(0).max(60000),
   'goto.waitUntil': Joi.string().min(1).max(2000),
-  'pdf.scale': Joi.number().min(0).max(1000),
+  'setContent.timeout': Joi.number().min(0).max(60000),
+  'setContent.waitUntil': Joi.string().min(1).max(2000),
+  'pdf.scale': Joi.number().min(0.1).max(2),
   'pdf.displayHeaderFooter': Joi.boolean(),
   'pdf.landscape': Joi.boolean(),
   'pdf.pageRanges': Joi.string().min(1).max(2000),
@@ -91,8 +93,12 @@ const renderBodyObject = Joi.object({
     timeout: Joi.number().min(0).max(60000),
     waitUntil: Joi.string().min(1).max(2000),
   }),
+  setContent: Joi.object({
+    timeout: Joi.number().min(0).max(60000),
+    waitUntil: Joi.string().min(1).max(2000),
+  }),
   pdf: Joi.object({
-    scale: Joi.number().min(0).max(1000),
+    scale: Joi.number().min(0.1).max(2),
     displayHeaderFooter: Joi.boolean(),
     landscape: Joi.boolean(),
     pageRanges: Joi.string().min(1).max(2000),

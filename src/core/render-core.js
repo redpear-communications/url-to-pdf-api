@@ -3,7 +3,21 @@ const _ = require('lodash');
 const config = require('../config');
 const logger = require('../util/logger')(__filename);
 
-async function createBrowser(opts) {
+let sharedBrowser = null;
+let sharedBrowserPromise = null;
+
+function shouldReuseBrowser(opts) {
+  // Keep old per-request browser behavior for insecure-cert requests.
+  return !config.DEBUG_MODE && !opts.ignoreHttpsErrors;
+}
+
+function isBrowserConnected(browser) {
+  return (
+    browser && typeof browser.connected === 'function' && browser.connected()
+  );
+}
+
+async function launchBrowser(opts) {
   const browserOpts = {
     acceptInsecureCerts: opts.ignoreHttpsErrors,
     slowMo: config.DEBUG_MODE ? 250 : undefined,
@@ -21,6 +35,35 @@ async function createBrowser(opts) {
     browserOpts.args.push('--disable-gpu');
   }
   return puppeteer.launch(browserOpts);
+}
+
+async function createBrowser(opts) {
+  if (!shouldReuseBrowser(opts)) {
+    return launchBrowser(opts);
+  }
+
+  if (isBrowserConnected(sharedBrowser)) {
+    return sharedBrowser;
+  }
+
+  if (!sharedBrowserPromise) {
+    sharedBrowserPromise = launchBrowser(opts)
+      .then((browser) => {
+        sharedBrowser = browser;
+        browser.once('disconnected', () => {
+          sharedBrowser = null;
+          sharedBrowserPromise = null;
+        });
+        return browser;
+      })
+      .catch((err) => {
+        sharedBrowser = null;
+        sharedBrowserPromise = null;
+        throw err;
+      });
+  }
+
+  return sharedBrowserPromise;
 }
 
 async function getFullPageHeight(page) {
@@ -50,7 +93,7 @@ async function waitForStylesAndFonts(page, timeoutMs = 10000) {
       document.querySelectorAll('link[rel="stylesheet"]'),
     );
 
-    await waitWithTimeout(
+    const styleSheetsReady = waitWithTimeout(
       Promise.all(
         stylesheetLinks.map((linkEl) => {
           if (linkEl.sheet) {
@@ -65,9 +108,11 @@ async function waitForStylesAndFonts(page, timeoutMs = 10000) {
       ),
     );
 
-    if (document.fonts && document.fonts.ready) {
-      await waitWithTimeout(document.fonts.ready.catch(() => null));
-    }
+    const fontsReady = document.fonts && document.fonts.ready
+      ? waitWithTimeout(document.fonts.ready.catch(() => null))
+      : Promise.resolve();
+
+    await Promise.all([styleSheetsReady, fontsReady]);
   }, timeoutMs);
 }
 
@@ -125,6 +170,7 @@ async function render(_opts = {}) {
 
   logOpts(opts);
 
+  const isReusedBrowser = shouldReuseBrowser(opts);
   const browser = await createBrowser(opts);
   const page = await browser.newPage();
 
@@ -133,28 +179,30 @@ async function render(_opts = {}) {
   page.on('error', (err) => {
     logger.error(`Error event emitted: ${err}`);
     logger.error(err.stack);
-    browser.close();
   });
 
+  const shouldTrackFailures = opts.failEarly === 'all' || opts.failEarly === 'page';
   const failedResponses = [];
   let mainUrlResponse = null;
 
-  page.on('requestfailed', (request) => {
-    failedResponses.push(request);
-    if (request.url() === opts.url) {
-      mainUrlResponse = request;
-    }
-  });
+  if (shouldTrackFailures) {
+    page.on('requestfailed', (request) => {
+      failedResponses.push(request);
+      if (request.url() === opts.url) {
+        mainUrlResponse = request;
+      }
+    });
 
-  page.on('response', (response) => {
-    if (response.status() >= 400) {
-      failedResponses.push(response);
-    }
+    page.on('response', (response) => {
+      if (response.status() >= 400) {
+        failedResponses.push(response);
+      }
 
-    if (response.url() === opts.url) {
-      mainUrlResponse = response;
-    }
-  });
+      if (response.url() === opts.url) {
+        mainUrlResponse = response;
+      }
+    });
+  }
 
   let data;
   try {
@@ -174,8 +222,8 @@ async function render(_opts = {}) {
       logger.info('Set HTML ..');
       await page.setContent(opts.html, opts.setContent);
 
-      if (hasExternalStyleOrFontRefs(opts.html)) {
-        await waitForStylesAndFonts(page, 3000);
+      if (opts.output !== 'html' && hasExternalStyleOrFontRefs(opts.html)) {
+        await waitForStylesAndFonts(page, 2500);
       }
     } else {
       logger.info(`Goto url ${opts.url} ..`);
@@ -269,8 +317,12 @@ async function render(_opts = {}) {
     logger.error(err.stack);
     throw err;
   } finally {
+    await page.close().catch((closeErr) => {
+      logger.warn(`Error when closing page: ${closeErr}`);
+    });
+
     logger.info('Closing browser..');
-    if (!config.DEBUG_MODE) {
+    if (!config.DEBUG_MODE && !isReusedBrowser) {
       await browser.close();
     }
   }

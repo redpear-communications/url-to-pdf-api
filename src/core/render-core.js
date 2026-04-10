@@ -5,6 +5,9 @@ const logger = require('../util/logger')(__filename);
 
 let sharedBrowser = null;
 let sharedBrowserPromise = null;
+const EXTERNAL_STYLESHEET_RE = /<link[^>]+rel=["']?stylesheet/i;
+const EXTERNAL_FONT_FACE_RE = /@font-face/i;
+const GOOGLE_FONT_HOST_RE = /fonts\.(googleapis|gstatic)\.com/i;
 
 function shouldReuseBrowser(opts) {
   // Keep old per-request browser behavior for insecure-cert requests.
@@ -119,9 +122,9 @@ async function waitForStylesAndFonts(page, timeoutMs = 10000) {
 function hasExternalStyleOrFontRefs(html) {
   // Avoid extra browser-side waits for pure inline HTML/CSS content.
   return (
-    /<link[^>]+rel=["']?stylesheet/i.test(html)
-    || /@font-face/i.test(html)
-    || /fonts\.(googleapis|gstatic)\.com/i.test(html)
+    EXTERNAL_STYLESHEET_RE.test(html)
+    || EXTERNAL_FONT_FACE_RE.test(html)
+    || GOOGLE_FONT_HOST_RE.test(html)
   );
 }
 
@@ -174,7 +177,9 @@ async function render(_opts = {}) {
   const browser = await createBrowser(opts);
   const page = await browser.newPage();
 
-  page.on('console', (msg) => logger.info(`PAGE LOG: ${msg.text()}`));
+  if (config.DEBUG_MODE) {
+    page.on('console', (msg) => logger.info(`PAGE LOG: ${msg.text()}`));
+  }
 
   page.on('error', (err) => {
     logger.error(`Error event emitted: ${err}`);
@@ -361,6 +366,13 @@ async function scrollPage(page) {
 }
 
 function logOpts(opts) {
+  if (
+    typeof logger.isLevelEnabled === 'function'
+    && !logger.isLevelEnabled('info')
+  ) {
+    return;
+  }
+
   const supressedOpts = _.cloneDeep(opts);
   if (opts.html) {
     supressedOpts.html = '...';

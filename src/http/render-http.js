@@ -9,7 +9,7 @@ const config = require('../config');
 function getMimeType(opts) {
   if (opts.output === 'pdf') {
     return 'application/pdf';
-  } else if (opts.output === 'html') {
+  } if (opts.output === 'html') {
     return 'text/html';
   }
 
@@ -105,14 +105,14 @@ function isUrlAllowed(inputUrl) {
   const matchInfos = _.map(config.ALLOW_URLS, (urlPattern) => {
     if (_.startsWith(urlPattern, 'host:')) {
       return isHostMatch(urlPattern.split(':')[1], urlParts.host);
-    } else if (_.startsWith(urlPattern, 'regex:')) {
+    } if (_.startsWith(urlPattern, 'regex:')) {
       return isRegexMatch(urlPattern.split(':')[1], inputUrl);
     }
 
     return isNormalizedMatch(urlPattern, inputUrl);
   });
 
-  const isAllowed = _.some(matchInfos, info => info.match);
+  const isAllowed = _.some(matchInfos, (info) => info.match);
   if (!isAllowed) {
     logger.info('The url was not allowed because:');
     _.forEach(matchInfos, (info) => {

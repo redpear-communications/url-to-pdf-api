@@ -37,6 +37,40 @@ async function getFullPageHeight(page) {
   return height;
 }
 
+async function waitForStylesAndFonts(page, timeoutMs = 10000) {
+  await page.evaluate(async (maxWaitMs) => {
+    const waitWithTimeout = (promise) => Promise.race([
+      promise,
+      new Promise((resolve) => {
+        setTimeout(resolve, maxWaitMs);
+      }),
+    ]);
+
+    const stylesheetLinks = Array.from(
+      document.querySelectorAll('link[rel="stylesheet"]'),
+    );
+
+    await waitWithTimeout(
+      Promise.all(
+        stylesheetLinks.map((linkEl) => {
+          if (linkEl.sheet) {
+            return Promise.resolve();
+          }
+
+          return new Promise((resolve) => {
+            linkEl.addEventListener('load', resolve, { once: true });
+            linkEl.addEventListener('error', resolve, { once: true });
+          });
+        }),
+      ),
+    );
+
+    if (document.fonts && document.fonts.ready) {
+      await waitWithTimeout(document.fonts.ready.catch(() => null));
+    }
+  }, timeoutMs);
+}
+
 async function render(_opts = {}) {
   const opts = _.merge(
     {
@@ -54,7 +88,7 @@ async function render(_opts = {}) {
         timeout: 60000,
       },
       setContent: {
-        waitUntil: 'domcontentloaded',
+        waitUntil: 'networkidle2',
         timeout: 60000,
       },
       output: 'pdf',
@@ -129,7 +163,28 @@ async function render(_opts = {}) {
 
     if (_.isString(opts.html)) {
       logger.info('Set HTML ..');
-      await page.setContent(opts.html, opts.setContent);
+      try {
+        await page.setContent(opts.html, opts.setContent);
+      } catch (err) {
+        if (
+          err.name === 'TimeoutError'
+          && opts.setContent
+          && opts.setContent.waitUntil !== 'domcontentloaded'
+        ) {
+          logger.warn('setContent timed out. Retrying with domcontentloaded.');
+          const fallbackSetContentOpts = _.merge({}, opts.setContent, {
+            waitUntil: 'domcontentloaded',
+          });
+          await page.setContent(opts.html, fallbackSetContentOpts);
+        } else {
+          throw err;
+        }
+      }
+
+      await waitForStylesAndFonts(
+        page,
+        Math.min(_.get(opts, 'setContent.timeout', 10000), 15000),
+      );
     } else {
       logger.info(`Goto url ${opts.url} ..`);
       await page.goto(opts.url, opts.goto);

@@ -50,6 +50,8 @@ and requests are direct connections to it.
 
 * **By default, page's `@media print` CSS rules are ignored**. We set Chrome to emulate `@media screen` to make the default PDFs look more like actual sites. To get results closer to desktop Chrome, add `&emulateScreenMedia=false` query parameter. See more at [Puppeteer API docs](https://github.com/GoogleChrome/puppeteer/blob/master/docs/api.md#pagepdfoptions).
 
+* **HTML rendering uses `page.setContent()` with its own options (`setContent.*`)**. By default this waits for `domcontentloaded` and applies a short extra wait for external styles/fonts before PDF/image output. If your template is heavy, tune `setContent.timeout` and `waitFor`.
+
 * Chrome is launched with `--no-sandbox --disable-setuid-sandbox` flags to fix usage in Heroku. See [this issue](https://github.com/GoogleChrome/puppeteer/issues/290).
 
 * Heavy pages may cause Chrome to crash if the server doesn't have enough RAM.
@@ -135,7 +137,7 @@ is quite simple, check it out. Render flow:
 3. Render url **or** html.
 
     If `url` is defined, **`page.goto(url, options)`** is called and options match `goto.*`.
-    Otherwise **`page.setContent(html, options)`** is called where html is taken from request body, and options match `goto.*`.
+    Otherwise **`page.setContent(html, options)`** is called where html is taken from request body, and options match `setContent.*`.
 
 4. *Possibly* **`page.waitFor(numOrStr)`** if e.g. `waitFor=1000` is set.
 5. *Possibly* **Scroll the whole page** to the end before rendering if e.g. `scrollPage=true` is set.
@@ -182,10 +184,12 @@ cookies[0][path] | string | - | Cookie path
 cookies[0][expires] | number | - | Cookie expiry in unix time
 cookies[0][httpOnly] | boolean | - | Cookie httpOnly
 cookies[0][secure] | boolean | - | Cookie secure
-cookies[0][sameSite] | string | - | `Strict` or `Lax`
-goto.timeout | number | `30000` |  Maximum navigation time in milliseconds, defaults to 30 seconds, pass 0 to disable timeout.
+cookies[0][sameSite] | string | - | `Strict`, `Lax` or `None`
+goto.timeout | number | `60000` |  Maximum navigation time in milliseconds, defaults to 60 seconds, pass 0 to disable timeout.
 goto.waitUntil | string | `networkidle0` | When to consider navigation succeeded. Options: `load`, `domcontentloaded`, `networkidle0`, `networkidle2`. `load` - consider navigation to be finished when the load event is fired. `domcontentloaded` - consider navigation to be finished when the `DOMContentLoaded` event is fired. `networkidle0` - consider navigation to be finished when there are no more than 0 network connections for at least `500` ms. `networkidle2` - consider navigation to be finished when there are no more than 2 network connections for at least `500` ms.
-pdf.scale | number | `1` | Scale of the webpage rendering.
+setContent.timeout | number | `60000` | Maximum time in milliseconds to wait for HTML content setup.
+setContent.waitUntil | string | `domcontentloaded` | When to consider HTML content setup completed. Options: `load`, `domcontentloaded`, `networkidle0`, `networkidle2`.
+pdf.scale | number | `1` | Scale of the webpage rendering. Accepted range is `0.1` to `2`.
 pdf.printBackground | boolean | `false`| Print background graphics.
 pdf.displayHeaderFooter | boolean | `false` | Display header and footer.
 pdf.headerTemplate | string | - | HTML template to use as the header of each page in the PDF. **Currently Puppeteer basically only supports a single line of text and you must use pdf.margins+CSS to make the header appear!** See https://github.com/alvarcarto/url-to-pdf-api/issues/77.
@@ -262,6 +266,9 @@ The only required parameter is `url`.
   // Passed to Puppeteer page.goto() as the second argument after url
   goto: { ... },
 
+  // Passed to Puppeteer page.setContent() as the second argument when using html input
+  setContent: { ... },
+
   // Passed to Puppeteer page.pdf()
   pdf: { ... },
 
@@ -299,7 +306,7 @@ curl -o html.pdf -XPOST -d@receipt.html -H"content-type: text/html" http://local
 
 To get this thing running, you have two options: run it in Heroku, or locally.
 
-The code requires Node 8+ (async, await).
+The code requires Node 22+.
 
 #### 1. Heroku deployment
 
@@ -326,7 +333,7 @@ First, clone the repository and cd into it.
 
 ### Techstack
 
-* Node 8+ (async, await), written in ES7
+* Node 22+, written in ES7
 * [Express.js](https://expressjs.com/) app with a nice internal architecture, based on [these conventions](https://github.com/kimmobrunfeldt/express-example).
 * Hapi-style Joi validation with [express-validation](https://github.com/andrewkeig/express-validation)
 * Heroku + [Puppeteer buildpack](https://github.com/jontewks/puppeteer-heroku-buildpack)
